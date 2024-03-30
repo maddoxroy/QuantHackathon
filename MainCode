@@ -1,0 +1,74 @@
+import pandas as pd
+
+# Load historical data for DAL (assuming the data is stored in a CSV file)
+dal_data = pd.read_csv('dal_data.csv', index_col='Date', parse_dates=True)
+
+# Calculate MACD (12-day and 26-day moving averages)
+dal_data['12-day EMA'] = dal_data['Close'].ewm(span=12).mean()
+dal_data['26-day EMA'] = dal_data['Close'].ewm(span=26).mean()
+dal_data['MACD'] = dal_data['12-day EMA'] - dal_data['26-day EMA']
+
+# Calculate the signal line (9-day exponential moving average of MACD)
+dal_data['Signal Line'] = dal_data['MACD'].ewm(span=9).mean()
+
+# Calculate the 200-day Simple Moving Average
+dal_data['200-day SMA'] = dal_data['Adj Close'].rolling(window=200).mean()
+
+# Implement more aggressive MACD strategy
+initial_balance = 10000  # Initial investment amount
+balance = initial_balance
+positionShare = 0
+stop_loss = 0.025  # Stop loss percentage
+shares_bought = 0  # Initialize shares bought
+total_shares_bought = 0
+final_sell_price = 45.59  # Fixed final sell price FOR NOW, CHANGE AT END
+betAmount = 40
+shift = 10
+
+print("Initial Balance: $:", initial_balance)
+
+for index, row in dal_data.iterrows():
+  if pd.isna(row['MACD']) or pd.isna(row['Signal Line']) or pd.isna(row['Adj Close']):
+    continue  # Skip NaN values
+  # Buy signal conditions (more aggressive)
+  if row['MACD'] > row['Signal Line'] and row['MACD'] < 0 and row['Adj Close'] > row['200-day SMA'] - shift:
+    if balance >= 0:  # Check if buying is affordable
+      positionShare = 1
+      buy_price = row['Adj Close']
+      shares_bought += float(betAmount /
+                           buy_price)  # Calculate affordable shares
+      total_shares_bought += shares_bought
+      balance -= shares_bought * buy_price  # Deduct cost of shares from balance
+      print(f"Buy DAL at {buy_price}, Shares: {shares_bought}, Date: {index}")
+      print(f"Current Balance: ${balance:.2f}")
+      shares_bought = 0
+      betAmount = betAmount * 1.55555
+
+  # Sell signal conditions (more aggressive)
+  if positionShare == 1 and row['Signal Line'] > row['MACD']:
+    sell_price = row['Adj Close']  # debugging, fixed sell price
+    if sell_price > buy_price:  # Ensure selling at a profit
+      balance += total_shares_bought * sell_price  # Add sale proceeds to balance
+      print(
+          f"Sell DAL at {sell_price}, Shares: {total_shares_bought} Balance: {balance}, Date: {index}"
+      )
+      total_shares_bought = 0
+      positionShare = 0
+      betAmount = balance * 0.1
+  # Reset shares bought, reset position, and make the new bet 10 percent of new balance
+  balance = balance * 1.0001443835616
+
+
+
+
+# Sell all remaining shares at the fixed final sell price
+if positionShare == 1:
+  balance += total_shares_bought * final_sell_price
+  print(
+      f"Sell all remaining DAL shares ({total_shares_bought}) at {final_sell_price}, Balance: {balance}"
+  )
+
+
+
+# Final balance after the trading period
+print(f"Final Balance: ${balance:.2f}")
