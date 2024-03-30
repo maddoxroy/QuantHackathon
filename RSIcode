@@ -1,1 +1,134 @@
+import pandas as pd
 
+# Load historical data for DAL (assuming the data is stored in a CSV file)
+dal_data = pd.read_csv('dal_data.csv', index_col='Date', parse_dates=True)
+clf_data = pd.read_csv('clf_data.csv', index_col='Date', parse_dates=True)
+
+# Calculate DAL MACD (12-day and 26-day moving averages)
+dal_data['12-day EMA'] = dal_data['Close'].ewm(span=12).mean()
+dal_data['26-day EMA'] = dal_data['Close'].ewm(span=26).mean()
+dal_data['MACD'] = dal_data['12-day EMA'] - dal_data['26-day EMA']
+
+# Calculate CLF MACD (12-day and 26-day moving averages)
+clf_data['12-day EMA'] = clf_data['Close'].ewm(span=12).mean()
+clf_data['26-day EMA'] = clf_data['Close'].ewm(span=26).mean()
+clf_data['MACD'] = clf_data['12-day EMA'] - clf_data['26-day EMA']
+
+# Calculate the signal line for DAL (9-day exponential moving average of MACD)
+dal_data['Signal Line'] = dal_data['MACD'].ewm(span=9).mean()
+
+# Calculate the 200-day Simple Moving Average for DAL
+dal_data['200-day SMA'] = dal_data['Adj Close'].rolling(window=200).mean()
+
+# Calculate the signal line for CLF (9-day exponential moving average of MACD)
+clf_data['Signal Line'] = clf_data['MACD'].ewm(span=9).mean()
+
+# Calculate the 200-day Simple Moving Average for CLF
+clf_data['200-day SMA'] = clf_data['Adj Close'].rolling(window=200).mean()
+
+# Calculate RSI
+# Calculate price changes
+delta = clf_data['Close'].diff()
+    
+# Define gain and loss
+gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+rs = gain/loss
+rsi = 100 - (100 / (1 + rs))
+
+clf_data['RSI'] = rsi
+
+# Merge data
+combined_data = pd.merge(dal_data, clf_data, on='Date')
+
+print(combined_data)
+
+# Implement more aggressive MACD strategy
+initial_balance = 10000  # Initial investment amount
+balance = initial_balance
+position = 0  # 0 for no position, 1 for long position
+stop_loss = 0.025  # Stop loss percentage
+shares_bought_delta = 0  # Initialize shares bought delta
+shares_bought_oil = 0 # Initialize shares bought for oil
+total_shares_bought_delta = 0
+total_shares_bought_oil = 0
+final_sell_price_delta = 45.59  # Fixed final sell price FOR NOW, CHANGE AT END
+final_sell_price_oil = 80.63
+betAmount_delta = 1000
+betAmount_oil = 85
+shift = 10
+
+# Upper and lower threshold for RSI
+upper_bound_RSI = 30
+lower_bound_RSI = 20
+
+
+print("Initial Balance: $:",initial_balance)
+
+# DELTA
+
+for index, row in combined_data.iterrows():
+
+    # Delta
+    if pd.isna(row['MACD_x']) or pd.isna(row['Signal Line_x']) or pd.isna(row['Adj Close_x']):
+        continue  # Skip NaN values
+
+    # Buy signal conditions (more aggressive)
+    if row['MACD_x'] > row['Signal Line_x'] and row['MACD_x'] < 0 and row['Adj Close_x'] > row['200-day SMA_x'] - shift:
+        if balance - (total_shares_bought_delta * row['Adj Close_x']) >= 0:  # Check if buying is affordable
+            position = 1
+            buy_price = row['Adj Close_x']
+            shares_bought_delta += int(betAmount_delta / buy_price)  # Calculate affordable shares
+            total_shares_bought_delta += shares_bought_delta
+            balance -= shares_bought_delta * buy_price  # Deduct cost of shares from balance
+            print(f"Buy DAL at {buy_price}, Shares: {shares_bought_delta}, Date: {index}")
+            print(f"Current Balance: ${balance:.2f}")
+            shares_bought_delta = 0
+            betAmount_delta = betAmount_delta * 1.55
+
+    # Sell signal conditions (more aggressive)
+    if position == 1 and row['Signal Line_x'] > row['MACD_x']:
+        sell_price =  row['Adj Close_x']# debugging, fixed sell price
+        if sell_price > buy_price:  # Ensure selling at a profit
+            print(f"Sell DAL at {sell_price}, Shares: {total_shares_bought_delta} Balance: {balance}, Date: {index}")
+            balance += total_shares_bought_delta * sell_price  # Add sale proceeds to balance
+            total_shares_bought_delta = 0
+            position = 0
+            betAmount_delta = balance * 0.1
+            # Reset shares bought, reset position, and make the new bet 10 percent of new balance
+
+    if pd.isna(row['MACD_x']) or pd.isna(row['Signal Line_x']) or pd.isna(row['Adj Close_x']):
+        continue  # Skip NaN values
+    
+
+    # Crude oil
+
+    # Check if RSI is crossing upper or lower threshold
+
+    if row['RSI'] > upper_bound_RSI and total_shares_bought_oil > 0:
+        sell_price =  row['Adj Close_y']# debugging, fixed sell price
+        print(f"Sell CLF at {sell_price}, Shares: {total_shares_bought_oil} Balance: {balance}, Date: {index}")
+        balance += total_shares_bought_oil * sell_price  # Add sale proceeds to balance
+        total_shares_bought_oil = 0
+        betAmount_oil = balance * 0.1
+    elif row['RSI'] < lower_bound_RSI:
+        buy_price = row['Adj Close_y']
+        shares_bought_oil += int(betAmount_oil / buy_price)  # Calculate affordable shares
+        if balance - (shares_bought_oil * row['Adj Close_y']) >= 0:  # Check if buying is affordable
+            total_shares_bought_oil += shares_bought_oil
+            balance -= shares_bought_oil * buy_price  # Deduct cost of shares from balance
+            print(f"Buy CLF at {buy_price}, Shares: {shares_bought_oil}, Date: {index}")
+            print(f"Current Balance: ${balance:.2f}")
+            shares_bought_oil = 0
+            betAmount_oil = betAmount_oil * 1.55
+            
+
+# Sell all remaining shares at the fixed final sell price
+if position == 1:
+    balance += total_shares_bought_delta * final_sell_price_delta
+    print(f"Sell all remaining DAL shares ({total_shares_bought_delta}) at {final_sell_price_delta}, Balance: {balance}")
+    balance += total_shares_bought_oil * final_sell_price_oil
+    print(f"Sell all remaining CLF shares ({total_shares_bought_oil}) at {final_sell_price_oil}, Balance: {balance}")
+
+# Final balance after the trading period
+print(f"Final Balance: {balance:.2f}")
